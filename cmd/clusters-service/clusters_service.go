@@ -1,3 +1,19 @@
+/*
+Copyright (c) 2018 Red Hat, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package main
 
 import (
@@ -18,6 +34,7 @@ type ClustersService interface {
 // GenericClustersService is a ClusterService placeholder implementation.
 type GenericClustersService struct {
 	connectionUrl string
+	provisioner   ClusterProvisioner
 }
 
 // ListArguments are arguments relevant for listing objects.
@@ -59,9 +76,10 @@ type ClusterNodes struct {
 }
 
 // NewClustersService Creates a new ClustersService.
-func NewClustersService(connectionUrl string) ClustersService {
+func NewClustersService(connectionUrl string, provisioner ClusterProvisioner) ClustersService {
 	service := new(GenericClustersService)
 	service.connectionUrl = connectionUrl
+	service.provisioner = provisioner
 	return service
 }
 
@@ -111,6 +129,14 @@ func (cs GenericClustersService) Create(spec Cluster) (result Cluster, err error
 	if err != nil {
 		return Cluster{}, err
 	}
+
+	// Use cluster provisioner to Provision a cluster.
+	err = cs.provisioner.Provision(uuid.String())
+	if err != nil {
+		return Cluster{}, fmt.Errorf("An error occurred while trying	to provision cluster %s: %s",
+			spec.Name, err)
+	}
+
 	db, err := sql.Open("postgres", cs.connectionUrl)
 	if err != nil {
 		return Cluster{}, err
@@ -118,22 +144,22 @@ func (cs GenericClustersService) Create(spec Cluster) (result Cluster, err error
 	defer db.Close()
 	stmt, err := db.Prepare(`
 		INSERT INTO clusters (
-			uuid, 
-			name, 
-			master_nodes, 
-			infra_nodes, 
-			compute_nodes, 
-			memory, 
-			cpu_cores, 
+			uuid,
+			name,
+			master_nodes,
+			infra_nodes,
+			compute_nodes,
+			memory,
+			cpu_cores,
 			storage
 		) VALUES (
-			$1, 
-			$2, 
-			$3, 
-			$4, 
-			$5, 
-			$6, 
-			$7, 
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			$6,
+			$7,
 			$8)
 	`)
 	if err != nil {
@@ -163,6 +189,7 @@ func (cs GenericClustersService) Create(spec Cluster) (result Cluster, err error
 	}
 
 	totalNodes := spec.Nodes.Master + spec.Nodes.Infra + spec.Nodes.Compute
+
 	return Cluster{
 		Name: spec.Name,
 		UUID: fmt.Sprintf("%s", uuid),

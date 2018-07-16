@@ -4,12 +4,18 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/container-mgmt/dedicated-portal/pkg/signals"
 	"github.com/container-mgmt/dedicated-portal/pkg/sql"
+	"github.com/golang/glog"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/spf13/cobra"
+	// "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/homedir"
 )
 
 var serveCmd = &cobra.Command{
@@ -51,18 +57,112 @@ func (s Server) start() error {
 	return nil
 }
 
-func runServe(*cobra.Command, []string) {
+var (
+	serverKubeAddress string
+	serverKubeConfig  string
+)
+
+func init() {
+	serveFlags := serveCmd.Flags()
+	serveFlags.StringVar(
+		&serverKubeConfig,
+		"kubeconfig",
+		"",
+		"Path to a Kubernetes client configuration file. Only required when running "+
+			"cluster-operator outside of a cluster.",
+	)
+	serveFlags.StringVar(
+		&serverKubeAddress,
+		"master",
+		"",
+		"The address of the Kubernetes API server. Overrides any value in the Kubernetes "+
+			"configuration file. Only required when running cluster-operator outside of a cluster.",
+	)
+}
+
+func kubeConfigPath(serverKubeConfig string) (kubeConfig string, err error) {
+	// The loading order follows these rules:
+	// 1. If the –kubeconfig flag is set,
+	// then only that file is loaded. The flag may only be set once.
+	// 2. If $KUBECONFIG environment variable is set, use it.
+	// 3. Otherwise, ${HOME}/.kube/config is used.
+	var ok bool
+
+	// Get the config file path
+	if serverKubeConfig != "" {
+		kubeConfig = serverKubeConfig
+	} else {
+		if kubeConfig, ok = os.LookupEnv("KUBECONFIG"); ok != true {
+			kubeConfig = filepath.Join(homedir.HomeDir(), ".kube", "config")
+		}
+	}
+
+	// Check config file:
+	fInfo, err := os.Stat(kubeConfig)
+	if os.IsNotExist(err) {
+		// NOTE: If config file does not exist, assume using pod configuration.
+		err = fmt.Errorf("The Kubernetes configuration file '%s' doesn't exist", kubeConfig)
+		kubeConfig = ""
+		return
+	}
+
+	// Check error codes.
+	if fInfo.IsDir() {
+		err = fmt.Errorf("The Kubernetes configuration path '%s' is a direcory", kubeConfig)
+		return
+	}
+	if os.IsPermission(err) {
+		err = fmt.Errorf("Can't open Kubernetes configuration file '%s'", kubeConfig)
+		return
+	}
+
+	return
+}
+
+func runServe(cmd *cobra.Command, args []string) {
 	// Set up signals so we handle the first shutdown signal gracefully:
 	stopCh := signals.SetupHandler()
+
+	// Load the Kubernetes configuration:
+	var config *rest.Config
+
+	kubeConfig, err := kubeConfigPath(serverKubeConfig)
+	if err == nil {
+		// If error is nil, we have a valid kubeConfig file:
+		config, err = clientcmd.BuildConfigFromFlags(serverKubeAddress, kubeConfig)
+		if err != nil {
+			glog.Fatalf(
+				"Error loading REST client configuration from file '%s': %s",
+				kubeConfig, err,
+			)
+		}
+	} else if kubeConfig == "" {
+		// If kubeConfig is "", file is missing, in this case we will
+		// try to use in-cluster configuration.
+		glog.Info("Try to use the in-cluster configuration")
+		config, err = rest.InClusterConfig()
+
+		// Catch in-cluster configuration error:
+		if err != nil {
+			glog.Fatalf("Error loading in-cluster REST client configuration: %s", err)
+		}
+	} else {
+		// Catch all errors:
+		glog.Fatalf("Error: %s", err)
+	}
+
 	url := ConnectionURL()
-	err := sql.EnsureSchema(
+	err = sql.EnsureSchema(
 		"/usr/local/share/clusters-service/migrations",
 		url,
 	)
 	if err != nil {
 		panic(err)
 	}
-	service := NewClustersService(url)
+
+	provisioner := NewClusterOperatorProvisioner(config)
+
+	service := NewClustersService(url, provisioner)
 	fmt.Println("Created cluster service.")
 
 	// This is temporary and should be replaced with reading from the queue
