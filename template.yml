@@ -144,6 +144,7 @@ objects:
           imagePullPolicy: IfNotPresent
           args:
           - serve
+          - --host=customers-service.${DOMAIN}
           - --sql-connection-string=host=localhost port=5432 user=service password=${PASSWORD} dbname=customers sslmode=disable
         - name: postgresql
           image: centos/postgresql-94-centos7
