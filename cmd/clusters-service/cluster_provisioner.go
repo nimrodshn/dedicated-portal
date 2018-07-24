@@ -49,6 +49,11 @@ type ClusterOperatorProvisioner struct {
 
 const clusterNameSpace = "dedicated-portal"
 
+var openshiftAnsibleImage = "cluster-operator-ansible:canary"
+var clusterAPIImage = "default('registry.svc.ci.openshift.org/openshift-cluster-operator/kubernetes-cluster-api:latest')"
+var machineControllerImgae = "default('registry.svc.ci.openshift.org/openshift-cluster-operator/cluster-operator:latest')"
+var pullPolicyNever = corev1.PullNever
+
 // NewClusterOperatorProvisioner A constructor for ClusterOperatorProvisioner struct.
 func NewClusterOperatorProvisioner(k8sConfig *rest.Config) (*ClusterOperatorProvisioner, error) {
 	metav1.AddToGroupVersion(scheme.Scheme, schema.GroupVersion{Version: "v1"})
@@ -74,12 +79,12 @@ func NewClusterOperatorProvisioner(k8sConfig *rest.Config) (*ClusterOperatorProv
 // Provision provisions a cluster on aws using cluster operator.
 func (provisioner *ClusterOperatorProvisioner) Provision(spec api.Cluster) error {
 	// Create secrets.
-	err := provisioner.createSecrets(spec)
-	if err != nil {
-		return fmt.Errorf("Failed to create secrets: %s", err)
-	}
+	// err := provisioner.createSecrets(spec)
+	// if err != nil {
+	// 	return fmt.Errorf("Failed to create secrets: %s", err)
+	// }
 	// Create cluster version object.
-	err = provisioner.createClusterVersionIfNotExist(spec)
+	err := provisioner.createClusterVersionIfNotExist(spec)
 	if err != nil {
 		return fmt.Errorf("Failed to create ClusterVersion object: %s", err)
 	}
@@ -114,14 +119,14 @@ func (provisioner *ClusterOperatorProvisioner) clusterDeploymentFromSpec(spec ap
 		Hardware: v1alpha1.ClusterHardwareSpec{
 			AWS: &v1alpha1.AWSClusterSpec{
 				AccountSecret: corev1.LocalObjectReference{
-					Name: fmt.Sprintf("%s-aws-creds", clusterName),
+					Name: "nshneor-aws-creds",
 				},
 				SSHSecret: corev1.LocalObjectReference{
-					Name: fmt.Sprintf("%s-ssh-key", clusterName),
+					Name: "ssh-secret",
 				},
 				SSHUser: "centos",
 				SSLSecret: corev1.LocalObjectReference{
-					Name: fmt.Sprintf("%s-certs", clusterName),
+					Name: "nshneor-certs",
 				},
 				Region:      "us-east-1",
 				KeyPairName: "libra",
@@ -200,7 +205,13 @@ func (provisioner *ClusterOperatorProvisioner) createClusterVersionIfNotExist(sp
 				},
 			},
 			Images: v1alpha1.ClusterVersionImages{
-				ImageFormat: "openshift/origin-${component}:v3.10.0",
+				ImageFormat:                      "openshift/origin-${component}:v3.10.0",
+				OpenshiftAnsibleImage:            &openshiftAnsibleImage,
+				OpenshiftAnsibleImagePullPolicy:  &pullPolicy,
+				ClusterAPIImage:                  &clusterAPIImage,
+				ClusterAPIImagePullPolicy:        &pullPolicy,
+				MachineControllerImage:           &machineControllerImgae,
+				MachineControllerImagePullPolicy: &pullPolicy,
 			},
 		},
 	}
