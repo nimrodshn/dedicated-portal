@@ -100,6 +100,8 @@ func (cs GenericClustersService) Create(spec api.Cluster) (result api.Cluster, e
 		return api.Cluster{}, err
 	}
 
+	spec.UUID = uuid
+
 	// Use cluster provisioner to Provision a cluster.
 	err = cs.provisioner.Provision(spec)
 	if err != nil {

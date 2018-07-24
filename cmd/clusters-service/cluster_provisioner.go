@@ -47,7 +47,9 @@ type ClusterOperatorProvisioner struct {
 	k8sClient             *k8s.Clientset
 }
 
-const clusterNameSpace = "dedicated-portal"
+// the name of the namespace containing all of the custom resources
+// required by clusters-operator.
+var clusterNameSpace string
 
 // NewClusterOperatorProvisioner A constructor for ClusterOperatorProvisioner struct.
 func NewClusterOperatorProvisioner(k8sConfig *rest.Config) (*ClusterOperatorProvisioner, error) {
@@ -73,8 +75,13 @@ func NewClusterOperatorProvisioner(k8sConfig *rest.Config) (*ClusterOperatorProv
 
 // Provision provisions a cluster on aws using cluster operator.
 func (provisioner *ClusterOperatorProvisioner) Provision(spec api.Cluster) error {
+	// Create new namespace.
+	err := provisioner.createNamespace(spec)
+	if err != nil {
+		return fmt.Errorf("Failed to create a new namespace for cluster resources: %s", err)
+	}
 	// Create secrets.
-	err := provisioner.createSecrets(spec)
+	err = provisioner.createSecrets(spec)
 	if err != nil {
 		return fmt.Errorf("Failed to create secrets: %s", err)
 	}
@@ -286,6 +293,26 @@ func (provisioner *ClusterOperatorProvisioner) createSecrets(spec api.Cluster) e
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (provisioner *ClusterOperatorProvisioner) createNamespace(spec api.Cluster) error {
+	clusterNameSpace = strings.ToLower(fmt.Sprintf("%s-%s", spec.Name, spec.UUID))
+	ns := corev1.Namespace{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Namespace",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: clusterNameSpace,
+		},
+	}
+	_, err := provisioner.k8sClient.CoreV1().
+		Namespaces().
+		Create(&ns)
+	if err != nil {
+		return err
 	}
 	return nil
 }
